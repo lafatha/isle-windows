@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Windows PowerShell 5.1
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The two mistakes that actually happen in a file this size: a brace closed one
+      # block too early, and a here-string that never ends.
+      - name: Both scripts parse
+        shell: powershell
+        run: |
+          $failed = $false
+          foreach ($file in 'isle-windows.ps1', 'run.ps1') {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$null, [ref]$errors)
+            if ($errors.Count -gt 0) {
+              $failed = $true
+              $errors | ForEach-Object { Write-Host "::error file=$file,line=$($_.Extent.StartLineNumber)::$($_.Message)" }
+            } else {
+              Write-Host "$file parses clean, $((Get-Content $file).Count) lines"
+            }
+          }
+          if ($failed) { exit 1 }
+
+      # Parsing says nothing about the markup: a mistyped name or a missing closing tag only
+      # shows when the window is built, so it is built here, headless.
+      - name: The island and Preferences windows load
+        shell: powershell
+        run: |
+          Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
+          $lines = [System.IO.File]::ReadAllLines((Resolve-Path 'isle-windows.ps1'))
+          $failed = $false
+          foreach ($marker in '[xml]$xaml = @"', '[xml]$prefsXaml = @"') {
+            $start = [array]::IndexOf($lines, $marker)
+            if ($start -lt 0) {
+              Write-Host "::error file=isle-windows.ps1::the here-string $marker is gone"
+              $failed = $true
+              continue
+            }
+            $end = -1
+            for ($i = $start + 1; $i -lt $lines.Count; $i++) {
+              if ($lines[$i].Trim() -eq '"@') { $end = $i; break }
+            }
+            if ($end -lt 0) {
+              Write-Host "::error file=isle-windows.ps1::the here-string $marker is never closed"
+              $failed = $true
+              continue
+            }
+            try {
+              [xml]$document = ($lines[($start + 1)..($end - 1)] -join "`n")
+              $reader = New-Object System.Xml.XmlNodeReader $document
+              $window = [System.Windows.Markup.XamlReader]::Load($reader)
+              Write-Host "$marker loads: $($window.GetType().Name) with $($document.DocumentElement.ChildNodes.Count) children"
+            } catch {
+              $failed = $true
+              Write-Host "::error file=isle-windows.ps1::$marker does not load: $($_.Exception.Message)"
+            }
+          }
+          if ($failed) { exit 1 }

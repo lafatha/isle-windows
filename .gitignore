@@ -1,0 +1,5 @@
+# The island is a script: nothing here is compiled, so there is no build output
+# to ignore. What still lands in the tree now and then is a log or an export
+# from a debugging session.
+*.log
+/dist
