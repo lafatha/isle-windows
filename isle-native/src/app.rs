@@ -503,6 +503,17 @@ impl App {
         self.dirty = true;
     }
 
+    /// Leaves the app the way it arrived: the notch shrinks back down to the
+    /// menu bar and tucks away, and once the spring has nearly finished the
+    /// window is destroyed (which ends the message loop and the process).
+    pub fn quit(&mut self) {
+        self.expanded = false;
+        self.input.field = None;
+        self.animator.start(COMPACT_W, 0.0, 16.0, 0.0);
+        self.dirty = true;
+        self.quit_at = Some(Instant::now() + Duration::from_millis(450));
+    }
+
     /// Raise an alert card in place of whatever was on screen, for six seconds.
     pub fn show_alert(&mut self, kind: AlertKind) {
         let (w, h, r) = match kind {

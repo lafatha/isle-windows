@@ -159,6 +159,20 @@ fn source_badge(c: &mut Canvas, app: &App, cx: f32, cy: f32) {
 /// The lyric mode: cover and controls on the left, the stream on the right.
 pub fn lyrics_page(app: &App, c: &mut Canvas, page: Rect) {
     let now = &app.media.now;
+
+    // With nothing playing (a refreshed browser tab, say) the lyric view is
+    // just the note centred in the island: no cover, scrubber or transport
+    // down the left.
+    if !now.has_track() {
+        let note = if app.lyrics.note.is_empty() {
+            "No song currently playing".to_string()
+        } else {
+            app.lyrics.note.clone()
+        };
+        c.text(&note, page, 13.0, NORMAL, DIM, Align::Center);
+        return;
+    }
+
     let left_w = 250.0;
     let y0 = page.y + ((page.h - 130.0) / 2.0).max(0.0);
 

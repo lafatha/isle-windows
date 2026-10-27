@@ -37,6 +37,8 @@ pub const WM_ISLE_SETTINGS: u32 = WM_APP + 1;
 pub const WM_ISLE_ALERT: u32 = WM_APP + 2;
 /// The island should empty its clipboard history.
 pub const WM_ISLE_CLEAR: u32 = WM_APP + 3;
+/// The app should close: the island tears itself down and the process ends.
+pub const WM_ISLE_QUIT: u32 = WM_APP + 4;
 
 /// `WM_MOUSELEAVE`. The crate's metadata omits it, so it is spelled here, the
 /// same way the island does.
@@ -100,6 +102,7 @@ enum Act {
     Demo(AlertKind),
     ClearClips,
     ResetAll,
+    Quit,
     Shape(usize),
     Colour(usize),
 }
@@ -571,6 +574,12 @@ impl Prefs {
                 // and started again from the defaults.
                 self.settings = Settings::default();
                 self.save();
+            }
+            Act::Quit => unsafe {
+                // Hide the settings window at once, then tell the island to
+                // shrink away and close the process when its animation ends.
+                let _ = ShowWindow(self.hwnd, SW_HIDE);
+                let _ = PostMessageW(self.island, WM_ISLE_QUIT, WPARAM(0), LPARAM(0));
             }
             Act::Shape(index) => {
                 if let Some(name) = bot::SHAPES.get(index) {
@@ -1931,14 +1940,24 @@ impl<'a> Ctx<'a> {
 
     fn about_page(&mut self, c: &mut Canvas, view: Rect, y: &mut f32) {
         group_title(c, view, y, "Settings");
-        let cells = vec![Cell::Button {
-            title: "Reset all settings",
-            sub: "Back to how Isle came; your data stays",
-            label: "Reset",
-            act: Act::ResetAll,
-            fill: RED,
-            ink: BLACK,
-        }];
+        let cells = vec![
+            Cell::Button {
+                title: "Reset all settings",
+                sub: "Back to how Isle came; your data stays",
+                label: "Reset",
+                act: Act::ResetAll,
+                fill: RED,
+                ink: BLACK,
+            },
+            Cell::Button {
+                title: "Quit Isle",
+                sub: "Closes the island and stops the app",
+                label: "Quit",
+                act: Act::Quit,
+                fill: RED,
+                ink: BLACK,
+            },
+        ];
         self.card(c, view, y, &cells);
     }
 }

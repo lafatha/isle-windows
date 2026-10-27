@@ -245,6 +245,8 @@ fn worker(cmd_rx: mpsc::Receiver<Cmd>, tx: mpsc::Sender<Snapshot>) {
     // The previous reading, so we only re-anchor when the player's position
     // actually moves rather than freezing on a value it keeps repeating.
     let mut last_provider: u64 = 0;
+    // The last playback state, so a play/pause edge can re-anchor the clock.
+    let mut was_playing = false;
 
     loop {
         // Act on transport requests first, so a click feels immediate.
@@ -309,6 +311,21 @@ fn worker(cmd_rx: mpsc::Receiver<Cmd>, tx: mpsc::Sender<Snapshot>) {
                         pos_at = Instant::now();
                     }
                     last_provider = provider;
+                    // On a play/pause edge, re-anchor our own clock: resuming
+                    // continues from where it stopped rather than from when the
+                    // track first loaded, and pausing freezes the reading in
+                    // place. Without this the seconds sit still for a poll after
+                    // you press play - the ~1s lag on starting a song.
+                    if now.playing != was_playing {
+                        if now.playing {
+                            pos_at = Instant::now();
+                        } else {
+                            pos_base =
+                                (pos_base + pos_at.elapsed().as_millis() as u64).min(now.duration_ms);
+                            pos_at = Instant::now();
+                        }
+                        was_playing = now.playing;
+                    }
                     now.position_ms = if now.playing {
                         (pos_base + pos_at.elapsed().as_millis() as u64).min(now.duration_ms)
                     } else {
@@ -332,9 +349,10 @@ fn worker(cmd_rx: mpsc::Receiver<Cmd>, tx: mpsc::Sender<Snapshot>) {
                         icon = crate::icon::resolve(&icon_key);
                     }
                 }
-                // The metadata call is the slow one; it runs here, off the
-                // render thread, once a second.
-                if last_props.elapsed() >= Duration::from_secs(1) {
+                // The metadata call is the slow one, so it is throttled - but
+                // kept brisk enough that a refreshed tab is recognised within a
+                // poll or two rather than a full second later.
+                if last_props.elapsed() >= Duration::from_millis(400) {
                     last_props = Instant::now();
                     if let Ok(props) = s.TryGetMediaPropertiesAsync().and_then(|o| o.get()) {
                         now.title = props.Title().map(|v| v.to_string()).unwrap_or_default();

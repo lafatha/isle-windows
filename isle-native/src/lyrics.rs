@@ -236,30 +236,85 @@ fn request(title: &str, artist: &str, duration_ms: u64) -> Option<Fetched> {
         use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
     }
-    // The search endpoint matches loosely and returns every candidate; the
-    // strict `get` endpoint only answers an exact title, so a browser's
-    // "(Official Video)" suffix would come back empty. A duration is sent
-    // when known so the right take of a repeated title wins.
-    let mut url = format!(
-        "https://lrclib.net/api/search?track_name={}&artist_name={}",
-        escape(title),
-        escape(artist)
-    );
-    if duration_ms > 0 {
-        url.push_str(&format!("&duration={}", (duration_ms / 1000) as i64));
-    }
-    let uri = Uri::CreateUri(&HSTRING::from(url)).ok()?;
     let client = HttpClient::new().ok()?;
-    let body = client.GetStringAsync(&uri).ok()?.get().ok()?.to_string();
-    let values: Vec<serde_json::Value> = serde_json::from_str(&body).ok()?;
-
-    // Prefer the candidate whose length is nearest ours (within a few seconds)
-    // and that carries a timed track; then any timed one; then plain text.
     let wanted = (duration_ms / 1000) as f64;
+    let have_dur = duration_ms > 0;
+
+    // One GET, parsed into a list of candidate records: `/search` answers with
+    // an array, `/get` with a single object, so a lone object is wrapped.
+    let get = |url: String| -> Option<Vec<serde_json::Value>> {
+        let uri = Uri::CreateUri(&HSTRING::from(url)).ok()?;
+        let body = client.GetStringAsync(&uri).ok()?.get().ok()?.to_string();
+        match serde_json::from_str::<Vec<serde_json::Value>>(&body) {
+            Ok(list) => Some(list),
+            Err(_) => serde_json::from_str::<serde_json::Value>(&body)
+                .ok()
+                .filter(|single| !single.is_null())
+                .map(|single| vec![single]),
+        }
+    };
+
+    // The loose queries run without a duration filter: a browser that reports
+    // the length a second off would otherwise hide the only match, which is why
+    // so many tracks came back empty. The duration only ranks the candidates.
+    let mut fallback_plain: Option<String> = None;
+    let queries = [
+        format!(
+            "https://lrclib.net/api/search?track_name={}&artist_name={}",
+            escape(title),
+            escape(artist)
+        ),
+        format!("https://lrclib.net/api/search?track_name={}", escape(title)),
+        format!(
+            "https://lrclib.net/api/search?q={}",
+            escape(&format!("{title} {artist}"))
+        ),
+    ];
+    for url in queries {
+        if let Some(list) = get(url) {
+            if let Some(fetched) = pick(&list, wanted, have_dur) {
+                if fetched.synced.is_some() {
+                    return Some(fetched);
+                }
+                if fallback_plain.is_none() {
+                    fallback_plain = fetched.plain;
+                }
+            }
+        }
+    }
+    // The strict endpoint last, when a duration is known to satisfy it.
+    if have_dur {
+        let url = format!(
+            "https://lrclib.net/api/get?track_name={}&artist_name={}&duration={}",
+            escape(title),
+            escape(artist),
+            (duration_ms / 1000) as i64
+        );
+        if let Some(list) = get(url) {
+            if let Some(fetched) = pick(&list, wanted, have_dur) {
+                if fetched.synced.is_some() {
+                    return Some(fetched);
+                }
+                if fallback_plain.is_none() {
+                    fallback_plain = fetched.plain;
+                }
+            }
+        }
+    }
+    Some(Fetched {
+        synced: None,
+        plain: fallback_plain,
+    })
+}
+
+/// From a batch of LRCLIB records, the best synced lyrics - the one whose
+/// length is nearest ours (within a few seconds), else any timed one - and,
+/// failing that, any plain text. `None` when the batch holds nothing usable.
+fn pick(values: &[serde_json::Value], wanted: f64, have_dur: bool) -> Option<Fetched> {
     let mut best: Option<(f64, String)> = None;
     let mut any_synced: Option<String> = None;
     let mut any_plain: Option<String> = None;
-    for value in &values {
+    for value in values {
         let synced = value
             .get("syncedLyrics")
             .and_then(|v| v.as_str())
@@ -272,7 +327,7 @@ fn request(title: &str, artist: &str, duration_ms: u64) -> Option<Fetched> {
             if any_synced.is_none() {
                 any_synced = Some(text.to_string());
             }
-            if duration_ms > 0 {
+            if have_dur {
                 let seconds = value.get("duration").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let distance = (seconds - wanted).abs();
                 if distance <= 3.0
@@ -288,10 +343,11 @@ fn request(title: &str, artist: &str, duration_ms: u64) -> Option<Fetched> {
             }
         }
     }
-    Some(Fetched {
-        synced: best.map(|(_, text)| text).or(any_synced),
-        plain: any_plain,
-    })
+    let synced = best.map(|(_, text)| text).or(any_synced);
+    if synced.is_none() && any_plain.is_none() {
+        return None;
+    }
+    Some(Fetched { synced, plain: any_plain })
 }
 
 #[cfg(test)]

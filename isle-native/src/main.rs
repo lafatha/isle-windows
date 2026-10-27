@@ -204,6 +204,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
             LRESULT(0)
         }
+        prefs::WM_ISLE_QUIT => {
+            // Shrink the notch away; its `quit_at` deadline then destroys the
+            // window, whose `WM_DESTROY` posts the quit that ends the app.
+            if let Some(window) = state(hwnd) {
+                window.app.quit();
+            }
+            LRESULT(0)
+        }
         WM_SETCURSOR => {
             let over = state(hwnd)
                 .map(|window| {
