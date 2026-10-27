@@ -3,3 +3,6 @@
 # from a debugging session.
 *.log
 /dist
+
+# The native build does compile, and its target directory is large.
+/isle-native/target

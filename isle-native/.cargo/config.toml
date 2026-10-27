@@ -1,0 +1,5 @@
+# The gcc first on PATH here is LLVM-MinGW, which ships no libgcc, so a plain
+# link fails on -lgcc/-lgcc_eh. rustup already carries self-contained libraries
+# for this very target; use those instead of the system toolchain's.
+[target.x86_64-pc-windows-gnu]
+rustflags = ["-C", "link-self-contained=yes"]

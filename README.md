@@ -4,13 +4,12 @@
 
 **A notch-style island for Windows.**
 
-Music with synced lyrics, a focus timer, reminders, a clipboard shelf, a
+Audio with synced lyrics, a focus timer, reminders, a clipboard shelf, a
 calendar, notifications, live resource usage, and an assistant that answers with
 the AI you already have installed — living in a notch at the top of your screen.
 
 ![Windows 10 & 11](https://img.shields.io/badge/Windows-10%20%26%2011-0078d4.svg)
-![Windows PowerShell 5.1](https://img.shields.io/badge/PowerShell-5.1-5391fe.svg)
-[![Buy me a coffee](https://img.shields.io/badge/support-buy%20me%20a%20coffee-ffdd00.svg)](https://sociabuzz.com/zickrian/tribe)
+![Native Rust](https://img.shields.io/badge/Rust-native-000000.svg)
 
 </div>
 
@@ -21,9 +20,10 @@ it on the way elsewhere leaves it closed. Alerts for volume, battery, calendar
 events and notifications appear in the same place instead of in the middle of
 the screen.
 
-Everything is one PowerShell script and the WPF window it builds. There is no
-installer, no service, no background daemon and no administrator prompt: start
-it, and it is there until you close it.
+Isle is a single native Windows binary: Rust drawing the island with Direct2D
+into one layered window, no installer, no service, no background daemon and no
+administrator prompt. Build it once and start it, and it is there until you
+close it.
 
 ## Contents
 
@@ -46,8 +46,8 @@ it, and it is there until you close it.
 <table>
 <tr>
 <td width="50%" valign="top">
-<img src="docs/images/music.png" alt="Music page" width="100%"><br>
-<b>Music.</b> Spotify, a browser tab, VLC or anything else that shows in the Windows media flyout: cover art with the playing app's own icon in the corner, a scrubber you can drag, transport controls and a volume slider that moves your real system volume.
+<img src="docs/images/music.png" alt="Audio page" width="100%"><br>
+<b>Audio.</b> Spotify, a browser tab, VLC or anything else that shows in the Windows media flyout: cover art with the playing app's own icon in the corner, a scrubber you can drag, transport controls and a volume slider that moves your real system volume.
 </td>
 <td width="50%" valign="top">
 <img src="docs/images/lyrics.png" alt="Synced lyrics" width="100%"><br>
@@ -81,7 +81,7 @@ it, and it is there until you close it.
 </td>
 <td width="50%" valign="top">
 <img src="docs/images/notifications.png" alt="The notifications page" width="100%"><br>
-<b>Notifications.</b> Windows notifications collect here as a plain list, newest first, with Clear a click away. Windows asks once, the first time, whether Isle may read them.
+<b>Notifications.</b> Windows notifications collect here as a plain list, newest first, and Clear dismisses them in Windows too, not only here. Windows asks once, the first time, whether Isle may read them.
 </td>
 </tr>
 <tr>
@@ -119,26 +119,26 @@ it, and it is there until you close it.
 ## Requirements
 
 - **Windows 10 (1809 or newer) or Windows 11.**
-- **Windows PowerShell 5.1**, which comes with Windows. The island is not
-  written for PowerShell 7 and does not need it.
-- Nothing to install. Not even administrator rights: the island runs as you,
-  in your session.
+- **Rust** (`cargo`), to build the binary. Install it from
+  [rustup.rs](https://rustup.rs); the toolchain is the usual stable one.
+- Nothing else to install. Not even administrator rights: the island runs as
+  you, in your session.
 
-Windows blocks local scripts by default. `run.bat` already passes
-`-ExecutionPolicy Bypass`, so the one-click way works on a stock machine; if you
-start `isle-windows.ps1` by hand, pass the same switch:
+The first run builds the native island and launches it. `run.bat` and `run.ps1`
+handle this for you; you can also build it directly:
 
 ```powershell
-powershell -STA -ExecutionPolicy Bypass -File .\isle-windows.ps1
+cd isle-native
+cargo build --release
+.\target\release\isle.exe
 ```
-
-`-STA` matters: the window needs a single-threaded apartment.
 
 ## Running it
 
 ```powershell
-.\run.bat                  # the usual way: starts it above the screen
+.\run.bat                  # the usual way: builds if needed, starts above the screen
 .\run.ps1                  # the same thing from PowerShell
+.\run.ps1 -Build           # force a rebuild before starting
 .\run.ps1 -Foreground      # keeps it in this window, so you see its errors
 .\run.ps1 -Kill            # closes a running island
 ```
@@ -150,7 +150,7 @@ shortcut to `run.bat` in `shell:startup`.
 ## Usage
 
 Point at the notch at the top centre of the screen. It opens with the page you
-left it on, and the tabs along the top switch between Music, Lyrics, Focus,
+left it on, and the tabs along the top switch between Audio, Lyrics, Focus,
 Reminders, Clipboard, Calendar, Notifications, the assistant and Usage. Point
 away, and it closes; passing over it on the way to something else leaves it
 closed.
@@ -218,10 +218,10 @@ closed first; nothing else should be holding the notch.
 **"Running scripts is disabled on this system."** Windows is refusing the file,
 not Isle. Use `run.bat`, or add `-ExecutionPolicy Bypass` as shown above.
 
-**No music, or no cover art.** Isle reads the Windows media session, the same
-list the media keys use. If the player is not in that flyout, it is not
-reporting itself to Windows and Isle cannot see it. Press a media key once, or
-press play in the app, and it appears.
+**The audio page says "There's no audio playing...."** Isle reads the Windows
+media session, the same list the media keys use. If the player is not in that
+flyout, it is not reporting itself to Windows and Isle cannot see it. Press a
+media key once, or press play in the app, and it appears.
 
 **The corner badge is empty.** That badge is the player's own icon, found from
 the app id the player reports. A player that reports an id which matches neither
@@ -247,20 +247,14 @@ it is there. Nothing was written anywhere else.
 
 ## How it works
 
-`isle-windows.ps1` is the whole application. It builds its window from the XAML
-at the top of the file, finds every control by name, and drives the pages from a
-timer four times a second. The pieces it uses:
+The application is the `isle-native` crate, a single `isle.exe`. It owns one
+layered window over the notch and repaints it from a timer, with the shape,
+spring and pixel maths ported line-for-line from the original so the motion and
+the bot's look match. The pieces it uses:
 
-- **WPF** for the window, the shapes, the spring physics and the animations.
+- **Direct2D / DirectWrite** for the window, the notch geometry, the spring
+  physics and every glyph and icon (parsed from SVG and cached).
 - **WinRT** (`Windows.Media.Control`, `Windows.UI.Notifications`) for the media
   session and for reading notifications.
-- **P/Invoke** for the processor and memory readings, and for the Windows audio
-  endpoint behind the volume slider.
-
-There is no daemon and no IPC: what the island shows, it asked Windows for.
-
-## Support
-
-If Isle is useful to you, you can
-[buy me a coffee](https://sociabuzz.com/zickrian/tribe). Bug reports and ideas
-belong in the issues.
+- **Win32** for the layered-window present, the processor and memory readings,
+  and the Windows audio endpoint behind the volume slider.
